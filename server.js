@@ -1,11 +1,19 @@
 // 1. เรียกใช้งาน Module ที่ชื่อว่า 'http' สำหรับทำเว็บเซิร์ฟเวอร์
 const http = require('http');
 
-// 2. กำหนดช่องทาง (Port) ให้รองรับการทำงานบน Cloud เช่น Railway หรือดีฟอลต์พอร์ต 3000
+// 2. เรียกใช้งาน Pool จากไลบรารี pg สำหรับจัดการการเชื่อมต่อฐานข้อมูล
+const { Pool } = require('pg');
+
+// 3. ตั้งค่าการเชื่อมต่อ โดยดึง URL มาจาก Environment Variable ของ Railway
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+});
+
+// 4. กำหนดช่องทาง (Port) ให้รองรับการทำงานบน Cloud เช่น Railway หรือดีฟอลต์พอร์ต 3000
 const port = process.env.PORT || 3000;
 
-// 3. สร้างเซิร์ฟเวอร์เพื่อคอยรับและตอบกลับคำขอของผู้ใช้งาน
-const server = http.createServer((req, res) => {
+// 5. สร้างเซิร์ฟเวอร์เพื่อคอยรับและตอบกลับคำขอของผู้ใช้งาน
+const server = http.createServer(async (req, res) => {
 
     // ตรวจสอบและดักจับคำขอ Favicon เพื่อป้องกันเซิร์ฟเวอร์ทำงานซ้ำซ้อน
     if (req.url === '/favicon.ico') {
@@ -14,14 +22,17 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // 3.1 กำหนดรหัสสถานะเป็น 200 (ทำงานสำเร็จ)
-    res.statusCode = 200;
+    // 5.1 ตัดเส้นทาง URL เพื่อกำหนดการทำงาน
+    const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = parsedUrl.pathname;
 
-    // 3.2 กำหนดให้ผลลัพธ์เป็นไฟล์ HTML รองรับภาษาไทย (utf-8)
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
-    // 3.3 ส่งหน้าเว็บดีไซน์ธีม "Disneyland Princess" สุดมหัศจรรย์กลับไป
-    res.end(`
+    try {
+        // เส้นทางหลัก: หน้าแรก (หน้า Dashboard)
+        if (pathname === '/') {
+            res.statusCode = 200;
+            res.end(`
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -141,7 +152,6 @@ const server = http.createServer((req, res) => {
             50% { box-shadow: 0 20px 60px rgba(219, 112, 147, 0.6), 0 0 50px rgba(255, 105, 180, 0.5), inset 0 0 30px rgba(255, 220, 230, 0.7); }
         }
 
-        /* โครมมิกกี้เจ้าหญิงชมพู */
         .mickey-brand {
             display: flex;
             justify-content: center;
@@ -167,30 +177,19 @@ const server = http.createServer((req, res) => {
             box-shadow: 0 0 20px rgba(255, 105, 180, 0.6);
         }
 
-        .mickey-ear-left {
+        .mickey-ear-left, .mickey-ear-right {
             width: 32px;
             height: 32px;
             background: linear-gradient(135deg, #ff69b4, #ff1493);
             border-radius: 50%;
             position: absolute;
             top: 0;
-            left: 5px;
             box-shadow: 0 0 15px rgba(255, 20, 147, 0.5);
             animation: earWiggle 2s ease-in-out infinite;
         }
 
-        .mickey-ear-right {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #ff69b4, #ff1493);
-            border-radius: 50%;
-            position: absolute;
-            top: 0;
-            right: 5px;
-            box-shadow: 0 0 15px rgba(255, 20, 147, 0.5);
-            animation: earWiggle 2s ease-in-out infinite;
-            animation-delay: 0.2s;
-        }
+        .mickey-ear-left { left: 5px; }
+        .mickey-ear-right { right: 5px; animation-delay: 0.2s; }
 
         @keyframes earWiggle {
             0%, 100% { transform: rotate(0deg); }
@@ -198,7 +197,6 @@ const server = http.createServer((req, res) => {
             75% { transform: rotate(10deg); }
         }
 
-        /* ข้อความต้อนรับเวทมนตร์ */
         .magic-spell {
             font-family: 'Cinzel', serif;
             font-size: 1.3rem;
@@ -235,10 +233,8 @@ const server = http.createServer((req, res) => {
             font-weight: 700;
             border-bottom: 3px dashed #ffb6d9;
             padding-bottom: 18px;
-            text-shadow: 2px 2px 4px rgba(255, 182, 193, 0.2);
         }
 
-        /* ข้อมูลของนักเรียน */
         .info-group {
             margin-bottom: 25px;
         }
@@ -253,27 +249,7 @@ const server = http.createServer((req, res) => {
             background: linear-gradient(135deg, rgba(255, 182, 193, 0.3), rgba(255, 220, 230, 0.3));
             border-radius: 15px;
             border-left: 5px solid #ff69b4;
-            border-right: 2px solid #ffb6d9;
             transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .info-text::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-            animation: shine 3s ease-in-out infinite;
-        }
-
-        @keyframes shine {
-            0% { left: -100%; }
-            50% { left: 100%; }
-            100% { left: 100%; }
         }
 
         .info-text:hover {
@@ -281,34 +257,19 @@ const server = http.createServer((req, res) => {
             box-shadow: 0 5px 20px rgba(255, 105, 180, 0.3);
         }
 
-        .info-label {
-            font-weight: 600;
-            color: #db7093;
-        }
-
         .highlight {
             color: #ff1493;
             font-weight: bold;
         }
 
-        /* แถบสถานะระบบ */
         .status {
             background: linear-gradient(135deg, #ff69b4, #db7093);
             color: #fff;
             padding: 15px 25px;
             border-radius: 15px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
             font-weight: bold;
-            font-size: 1rem;
             margin-top: 25px;
             box-shadow: 0 8px 25px rgba(255, 105, 180, 0.4);
-            border: 2px solid #fff;
-            width: 100%;
-            box-sizing: border-box;
-            transition: all 0.3s ease;
             animation: statusPulse 2s ease-in-out infinite;
         }
 
@@ -317,65 +278,42 @@ const server = http.createServer((req, res) => {
             50% { transform: scale(1.02); }
         }
 
-        .status:hover {
-            transform: translateY(-5px) scale(1.02);
-            box-shadow: 0 12px 35px rgba(255, 105, 180, 0.6);
-        }
-
-        .status::before {
-            content: '✨';
-            font-size: 1.3rem;
-            animation: rotate 3s linear infinite;
-        }
-
-        @keyframes rotate {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* ปุ่มปฏิสัมพันธ์ */
-        .interactive-btn {
-            display: inline-block;
+        .nav-links {
             margin-top: 20px;
-            padding: 12px 30px;
+        }
+
+        .nav-links a {
+            display: inline-block;
+            margin: 8px;
+            padding: 12px 25px;
             background: linear-gradient(135deg, #ff1493, #ff69b4);
             color: white;
-            border: none;
-            border-radius: 25px;
-            font-size: 1rem;
+            text-decoration: none;
+            border-radius: 20px;
             font-weight: bold;
-            cursor: pointer;
             transition: all 0.3s ease;
-            box-shadow: 0 5px 20px rgba(255, 20, 147, 0.4);
+            box-shadow: 0 5px 15px rgba(255, 20, 147, 0.3);
         }
 
-        .interactive-btn:hover {
-            transform: translateY(-3px) scale(1.05);
-            box-shadow: 0 8px 30px rgba(255, 20, 147, 0.6);
-            background: linear-gradient(135deg, #ff69b4, #ff1493);
-        }
-
-        .interactive-btn:active {
-            transform: translateY(-1px) scale(1.02);
+        .nav-links a:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255, 20, 147, 0.5);
         }
     </style>
 </head>
 <body>
 
-    <!-- ดาวระยิบระยับด้านหลัง -->
     <div class="star">✨</div>
     <div class="star">⭐</div>
     <div class="star">✨</div>
     <div class="star">⭐</div>
     <div class="star">✨</div>
 
-    <!-- ปุ่มเวทมนตร์ลอยสูง -->
     <div class="floating-orb orb-1"></div>
     <div class="floating-orb orb-2"></div>
     <div class="floating-orb orb-3"></div>
 
     <div class="card">
-        <!-- สัญลักษณ์ Mickey Mouse เจ้าหญิงชมพู ตกแต่งด้านบนการ์ด -->
         <div class="mickey-brand">
             <div class="mickey-ear-left"></div>
             <div class="mickey-ear-right"></div>
@@ -388,63 +326,158 @@ const server = http.createServer((req, res) => {
         
         <div class="info-group">
             <div class="info-text">
-                <span class="info-label">🎓 รหัสนักศึกษา:</span>
+                <span>🎓 รหัสนักศึกษา:</span>
                 <span class="highlight">69319010047</span>
             </div>
             <div class="info-text">
-                <span class="info-label">📚 ระดับชั้น:</span>
+                <span>📚 ระดับชั้น:</span>
                 <span class="highlight">HIT.1/1 (VB)</span>
             </div>
             <div class="info-text">
-                <span class="info-label">💻 สาขา:</span>
+                <span>💻 สาขา:</span>
                 <span class="highlight">เทคโนโลยีสารสนเทศ</span>
             </div>
         </div>
         
-        <div class="status">ดินแดนเวทมนตร์บนระบบ Railway เปิดทำงานปกติแล้วค่ะ! 👑</div>
+        <div class="status">✨ ดินแดนเวทมนตร์บนระบบ Railway เปิดทำงานแล้ว! ✨</div>
 
-        <button class="interactive-btn">✨ คลิกเพื่อต่อการเวทมนตร์ ✨</button>
+        <div class="nav-links">
+            <a href="/students">📊 ดูข้อมูลนักศึกษา</a>
+        </div>
     </div>
-
-    <script>
-        // เพิ่มเสียงและเอฟเฟกต์เมื่อคลิกปุ่ม
-        document.querySelector('.interactive-btn').addEventListener('click', function() {
-            // สร้างอนุภาคเล็กๆ ตกลงมา
-            for (let i = 0; i < 10; i++) {
-                const particle = document.createElement('div');
-                particle.style.position = 'fixed';
-                particle.style.pointerEvents = 'none';
-                particle.textContent = ['✨', '💗', '⭐', '💖'][Math.floor(Math.random() * 4)];
-                particle.style.fontSize = Math.random() * 20 + 20 + 'px';
-                particle.style.left = this.offsetLeft + this.offsetWidth / 2 + 'px';
-                particle.style.top = this.offsetTop + this.offsetHeight / 2 + 'px';
-                particle.style.animation = \`particle-fall \${2 + Math.random()}s ease-out forwards\`;
-                document.body.appendChild(particle);
-                setTimeout(() => particle.remove(), 2000);
-            }
-        });
-    </script>
-
-    <style>
-        @keyframes particle-fall {
-            0% {
-                transform: translateY(0) translateX(0) scale(1);
-                opacity: 1;
-            }
-            100% {
-                transform: translateY(300px) translateX(\${Math.random() * 200 - 100}px) scale(0);
-                opacity: 0;
-            }
-        }
-    </style>
 
 </body>
 </html>
-    `);
+            `);
+        }
+        // เส้นทาง: ดูข้อมูลนักศึกษา (เชื่อมต่อฐานข้อมูล PostgreSQL)
+        else if (pathname === '/students') {
+            const client = await pool.connect();
+            try {
+                // 3. ขอเชื่อมต่อและส่งคำสั่ง SQL ไปดึงข้อมูลจากตาราง students
+                const result = await client.query('SELECT * FROM students ORDER BY student_id LIMIT 100');
+                
+                // 4. นำข้อมูลที่ได้ (result.rows) มาประกอบเป็นตาราง HTML
+                let tableHtml = `
+                    <div style="background: linear-gradient(135deg, #ffd1e8, #d78ec6); min-height: 100vh; padding: 40px 20px; font-family: 'Sarabun', sans-serif;">
+                        <div style="max-width: 1000px; margin: 0 auto;">
+                            <div style="background: white; border-radius: 20px; padding: 30px; box-shadow: 0 10px 40px rgba(219, 112, 147, 0.3);">
+                                <h1 style="color: #c2185b; margin-bottom: 10px; text-align: center;">📚 ข้อมูลนักศึกษา</h1>
+                                <p style="text-align: center; color: #db7093; margin-bottom: 20px; font-size: 1.1rem;">
+                                    จำนวนทั้งหมด: <strong style="color: #ff1493;">${result.rows.length}</strong> คน
+                                </p>
+                `;
+
+                if (result.rows.length > 0) {
+                    tableHtml += `
+                                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                                    <thead>
+                                        <tr style="background: linear-gradient(135deg, #ff69b4, #db7093); color: white; font-weight: bold;">
+                                            <th style="padding: 15px; text-align: left; border: 2px solid #ffb6d9;">🎓 รหัสนักศึกษา</th>
+                                            <th style="padding: 15px; text-align: left; border: 2px solid #ffb6d9;">👤 ชื่อ-นามสกุล</th>
+                                            <th style="padding: 15px; text-align: left; border: 2px solid #ffb6d9;">📧 อีเมล</th>
+                                            <th style="padding: 15px; text-align: left; border: 2px solid #ffb6d9;">📞 เบอร์โทรศัพท์</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                    `;
+
+                    // วนลูปนำข้อมูลแต่ละแถวมาแสดง
+                    result.rows.forEach((row, index) => {
+                        const bgColor = index % 2 === 0 ? '#ffffff' : '#fff5f8';
+                        tableHtml += `
+                            <tr style="background: ${bgColor}; transition: all 0.3s ease;">
+                                <td style="padding: 12px 15px; border: 1px solid #ffb6d9; color: #c2185b; font-weight: bold;">${row.student_id || '-'}</td>
+                                <td style="padding: 12px 15px; border: 1px solid #ffb6d9; color: #333;">${row.student_name || '-'}</td>
+                                <td style="padding: 12px 15px; border: 1px solid #ffb6d9; color: #333;">${row.student_email || '-'}</td>
+                                <td style="padding: 12px 15px; border: 1px solid #ffb6d9; color: #333;">${row.student_phone || '-'}</td>
+                            </tr>
+                        `;
+                    });
+
+                    tableHtml += `
+                                    </tbody>
+                                </table>
+                    `;
+                } else {
+                    tableHtml += `
+                                <div style="text-align: center; padding: 40px; background: #fff5f8; border-radius: 15px; color: #db7093;">
+                                    <p style="font-size: 1.1rem;">❌ ไม่มีข้อมูลนักศึกษาในฐานข้อมูล</p>
+                                    <p style="font-size: 0.9rem; margin-top: 10px;">กรุณาเพิ่มข้อมูลนักศึกษาในฐานข้อมูล PostgreSQL</p>
+                                </div>
+                    `;
+                }
+
+                tableHtml += `
+                                <div style="text-align: center; margin-top: 20px;">
+                                    <a href="/" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff1493, #ff69b4); color: white; text-decoration: none; border-radius: 20px; font-weight: bold; transition: all 0.3s ease; box-shadow: 0 5px 15px rgba(255, 20, 147, 0.3);">← กลับไปหน้าแรก</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                res.statusCode = 200;
+                res.end(tableHtml);
+            } finally {
+                // คืนการเชื่อมต่อเมื่อใช้งานเสร็จ
+                client.release();
+            }
+        }
+        // หน้า 404 สำหรับเส้นทางที่ไม่ถูกต้อง
+        else {
+            res.statusCode = 404;
+            res.end(`
+                <div style="background: linear-gradient(135deg, #ffd1e8, #d78ec6); min-height: 100vh; display: flex; justify-content: center; align-items: center; font-family: 'Sarabun', sans-serif;">
+                    <div style="text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(219, 112, 147, 0.3);">
+                        <h1 style="color: #c2185b; font-size: 3rem; margin-bottom: 10px;">404</h1>
+                        <p style="color: #db7093; font-size: 1.2rem; margin-bottom: 20px;">ไม่พบเพจที่ค้นหา</p>
+                        <a href="/" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff1493, #ff69b4); color: white; text-decoration: none; border-radius: 20px; font-weight: bold;">← กลับไปหน้าแรก</a>
+                    </div>
+                </div>
+            `);
+        }
+
+    } catch (err) {
+        // กรณีเชื่อมต่อไม่ได้หรือเขียนชื่อตารางผิด
+        console.error('Database Error:', err);
+        res.statusCode = 500;
+        res.end(`
+            <div style="background: linear-gradient(135deg, #ffd1e8, #d78ec6); min-height: 100vh; display: flex; justify-content: center; align-items: center; font-family: 'Sarabun', sans-serif;">
+                <div style="text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(219, 112, 147, 0.3); max-width: 500px;">
+                    <h1 style="color: #c2185b; margin-bottom: 10px;">⚠️ เกิดข้อผิดพลาด</h1>
+                    <p style="color: #db7093; margin-bottom: 20px;"><strong>รายละเอียด:</strong></p>
+                    <p style="color: #666; font-size: 0.95rem; margin-bottom: 20px; background: #f5f5f5; padding: 15px; border-radius: 10px; border-left: 4px solid #ff69b4; word-break: break-all;">
+                        ${err.message}
+                    </p>
+                    <p style="color: #666; font-size: 0.9rem; margin-bottom: 15px; font-weight: bold;">✓ ตรวจสอบให้แน่ใจว่า:</p>
+                    <ul style="color: #666; text-align: left; margin-left: 20px; margin-bottom: 20px; line-height: 1.8;">
+                        <li>✓ ตั้งค่า <strong>DATABASE_URL</strong> ใน Environment Variable แล้ว</li>
+                        <li>✓ ฐานข้อมูล PostgreSQL เปิดใช้งาน</li>
+                        <li>✓ ตารางชื่อ <strong>students</strong> มีอยู่ในฐานข้อมูล</li>
+                        <li>✓ คอลัมน์: student_id, student_name, student_email, student_phone</li>
+                    </ul>
+                    <div style="background: #fff5f8; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: left; font-size: 0.85rem;">
+                        <p style="color: #c2185b; font-weight: bold; margin-bottom: 10px;">📝 SQL สำหรับสร้างตาราง:</p>
+                        <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; color: #333;">CREATE TABLE students (
+    student_id VARCHAR(20) PRIMARY KEY,
+    student_name VARCHAR(255),
+    student_email VARCHAR(255),
+    student_phone VARCHAR(20)
+);</pre>
+                    </div>
+                    <a href="/" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff1493, #ff69b4); color: white; text-decoration: none; border-radius: 20px; font-weight: bold;">← กลับไปหน้าแรก</a>
+                </div>
+            </div>
+        `);
+    }
 
 });
 
-// 4. สั่งให้เซิร์ฟเวอร์เริ่มต้นเปิดรับฟังการทำงานตาม Port ที่กำหนดไว้
+// 6. สั่งให้เซิร์ฟเวอร์เริ่มต้นเปิดรับฟังการทำงานตาม Port ที่กำหนดไว้
 server.listen(port, () => {
-    console.log(`✨ Princess Magical Server is running! ดินแดนดิสนีย์แลนด์เจ้าหญิงเปิดใช้งานแล้วที่ช่องทางพอร์ต: ${port}`);
+    console.log(`✨ Princess Magical Server is running!`);
+    console.log(`📍 ดินแดนดิสนีย์แลนด์เจ้าหญิงเปิดใช้งานแล้วที่ช่อง ${port}`);
+    console.log(`🌐 URL: http://localhost:${port}`);
+    console.log(`📊 ดูข้อมูลนักศึกษา: http://localhost:${port}/students`);
 });
