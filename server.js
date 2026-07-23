@@ -1,97 +1,71 @@
-// 1. เรียกใช้งาน Module ที่ชื่อว่า 'http' สำหรับทำเว็บเซิร์ฟเวอร์
+// 1. เรียกใช้งาน Module สำหรับทำเว็บเซิร์ฟเวอร์ และ PostgreSQL
 const http = require('http');
+const { Pool } = require('pg');
 
-// 2. เรียกใช้งาน PostgreSQL Driver
-const { Client } = require('pg');
-
-// 3. กำหนดช่องทาง (Port) ให้รองรับการทำงานบน Cloud เช่น Railway หรือดีฟอลต์พอร์ต 3000
+// 2. กำหนดพอร์ตสำหรับ Railway / Cloud
 const port = process.env.PORT || 3000;
 
-// 4. ตั้งค่าการเชื่อมต่อ PostgreSQL
-const dbConfig = {
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'password',
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME || 'my_database',
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false
-};
+// 3. ตั้งค่าการเชื่อมต่อ PostgreSQL (รองรับ DATABASE_URL บน Railway และ SSL)
+const connectionString = process.env.DATABASE_URL;
 
-// 5. ตัวแปรเก็บสถานะการเชื่อมต่อ
-let dbConnected = false;
-let studentData = {
+const dbConfig = connectionString 
+  ? {
+      connectionString,
+      ssl: { rejectUnauthorized: false }
+    }
+  : {
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || 'password',
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT || 5432,
+      database: process.env.DB_NAME || 'my_database',
+      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false
+    };
+
+// สร้าง Connection Pool
+const pool = new Pool(dbConfig);
+
+// ข้อมูลนักเรียนเริ่มต้นกรณีพึ่งสร้างตารางใหม่
+const defaultStudent = {
     id: '69319010047',
     name: 'นางสาวณัฐชา พิมพ์ทวด',
     level: 'HIT.1/1 (VB)',
     major: 'เทคโนโลยีสารสนเทศ'
 };
 
-// 6. ฟังก์ชันเชื่อมต่อกับ PostgreSQL
-async function connectToDatabase() {
-    const client = new Client(dbConfig);
+// 4. ฟังก์ชันสำหรับสร้างตารางและใส่ข้อมูลเริ่มต้น (ถ้ายังไม่มี)
+async function initDatabase() {
     try {
-        await client.connect();
-        console.log('✅ เชื่อมต่อ PostgreSQL สำเร็จ!');
+        const client = await pool.connect();
         
-        // ทดสอบการคิวรี่ข้อมูล
-        const result = await client.query('SELECT NOW() as current_time');
-        console.log('⏰ เวลาฐานข้อมูล:', result.rows[0].current_time);
-        
-        dbConnected = true;
-        await client.end();
-        return true;
-    } catch (error) {
-        console.error('❌ ไม่สามารถเชื่อมต่อ PostgreSQL ได้:', error.message);
-        dbConnected = false;
-        return false;
-    }
-}
+        // สร้างตารางถ้ายังไม่มี
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS students (
+                id VARCHAR(20) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                level VARCHAR(50) DEFAULT 'HIT.1/1 (VB)',
+                major VARCHAR(100) DEFAULT 'เทคโนโลยีสารสนเทศ'
+            )
+        `);
 
-// 7. ฟังก์ชันดึงข้อมูลจากฐานข้อมูล
-async function fetchStudentData() {
-    const client = new Client(dbConfig);
-    try {
-        await client.connect();
-        
-        // ถ้าตารางมีอยู่แล้ว ให้ดึงข้อมูล (หรือสร้างตารางใหม่)
-        try {
-            const result = await client.query(
-                'SELECT id, name, level, major FROM students LIMIT 1'
-            );
-            
-            if (result.rows.length > 0) {
-                studentData = result.rows[0];
-                console.log('📊 ดึงข้อมูลนักศึกษาจากฐานข้อมูลสำเร็จ');
-            }
-        } catch (err) {
-            // ถ้าตารางไม่มี ให้สร้างตารางใหม่
-            console.log('📋 สร้างตารางใหม่...');
-            await client.query(`
-                CREATE TABLE IF NOT EXISTS students (
-                    id VARCHAR(20) PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL,
-                    level VARCHAR(50) NOT NULL,
-                    major VARCHAR(100) NOT NULL
-                )
-            `);
-            
-            // เพิ่มข้อมูลตัวอย่าง
+        // เช็กว่ามีข้อมูลในตารางไหม ถ้าไม่มีให้ใส่ข้อมูลเริ่มต้น
+        const checkResult = await client.query('SELECT COUNT(*) FROM students');
+        if (parseInt(checkResult.rows[0].count) === 0) {
             await client.query(
                 'INSERT INTO students (id, name, level, major) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-                ['69319010047', 'นางสาวณัฐชา พิมพ์ทวด', 'HIT.1/1 (VB)', 'เทคโนโลยีสารสนเทศ']
+                [defaultStudent.id, defaultStudent.name, defaultStudent.level, defaultStudent.major]
             );
-            console.log('✨ สร้างตารางและเพิ่มข้อมูลสำเร็จ');
+            console.log('✨ สร้างตารางและเพิ่มข้อมูลเริ่มต้นเรียบร้อย');
         }
-        
-        await client.end();
+
+        client.release();
     } catch (error) {
-        console.error('⚠️ ข้อผิดพลาดในการดึงข้อมูล:', error.message);
+        console.error('⚠️ ข้อผิดพลาดในการเริ่มต้นฐานข้อมูล:', error.message);
     }
 }
 
-// 8. ฟังก์ชันดึงข้อมูลทั่วไปจากฐานข้อมูล
+// 5. ฟังก์ชันดึงสถานะฐานข้อมูล
 async function getServerInfo() {
-    const client = new Client(dbConfig);
     let info = {
         status: '❌ ไม่เชื่อมต่อ',
         serverTime: 'N/A',
@@ -100,19 +74,15 @@ async function getServerInfo() {
     };
     
     try {
-        await client.connect();
-        
-        // ดึงเวลาปัจจุบัน
+        const client = await pool.connect();
         const timeResult = await client.query('SELECT NOW() as current_time');
         info.serverTime = timeResult.rows[0].current_time;
         
-        // ดึงเวอร์ชัน PostgreSQL
         const versionResult = await client.query('SELECT version()');
         info.version = versionResult.rows[0].version;
         
         info.status = '✅ เชื่อมต่อสำเร็จ';
-        
-        await client.end();
+        client.release();
     } catch (error) {
         info.status = '⚠️ ข้อผิดพลาด';
         info.message = error.message;
@@ -121,38 +91,74 @@ async function getServerInfo() {
     return info;
 }
 
-// 9. สร้างเซิร์ฟเวอร์ HTTP
+// 6. ฟังก์ชันดึงรายการนักศึกษาทั้งหมด
+async function getAllStudents() {
+    try {
+        const client = await pool.connect();
+        const result = await client.query('SELECT * FROM students');
+        client.release();
+        return result.rows;
+    } catch (error) {
+        console.error('❌ ดึงข้อมูลนักศึกษาล้มเหลว:', error.message);
+        return [];
+    }
+}
+
+// 7. สร้างเซิร์ฟเวอร์ HTTP
 const server = http.createServer(async (req, res) => {
 
-    // ตรวจสอบและดักจับคำขอ Favicon เพื่อป้องกันเซิร์ฟเวอร์ทำงานซ้ำซ้อน
+    // ดักจับ Favicon
     if (req.url === '/favicon.ico') {
         res.writeHead(204);
         res.end();
         return;
     }
 
-    // ตรวจสอบ route
+    // API Endpoint: ดูสถานะระบบ
     if (req.url === '/api/status' && req.method === 'GET') {
-        // API endpoint สำหรับตรวจสอบสถานะฐานข้อมูล
         const info = await getServerInfo();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(info, null, 2));
         return;
     }
 
+    // API Endpoint: ดูข้อมูลนักศึกษาในรูปแบบ JSON
     if (req.url === '/api/students' && req.method === 'GET') {
-        // API endpoint สำหรับดึงข้อมูลนักศึกษา
+        const students = await getAllStudents();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(studentData, null, 2));
+        res.end(JSON.stringify(students.length > 0 ? students : [defaultStudent], null, 2));
         return;
     }
 
-    // หน้าแรก (Home Page)
+    // หน้าแรก (HTML Web Page)
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
-    // ดึงข้อมูลสถานะฐานข้อมูล
     const serverInfo = await getServerInfo();
+    const students = await getAllStudents();
+
+    // สร้างแถวตาราง HTML จากข้อมูลที่ดึงมาจากฐานข้อมูล
+    let tableRowsHTML = '';
+    if (students.length === 0) {
+        tableRowsHTML = `<tr><td colspan="4" style="text-align: center; color: #db7093; padding: 15px;">ไม่พบข้อมูลนักศึกษาในระบบ</td></tr>`;
+    } else {
+        students.forEach(row => {
+            // รองรับทั้งชื่อคอลัมน์ id/student_id และ name/student_name
+            const id = row.id || row.student_id || '-';
+            const name = row.name || row.student_name || '-';
+            const level = row.level || 'HIT.1/1 (VB)';
+            const major = row.major || 'เทคโนโลยีสารสนเทศ';
+
+            tableRowsHTML += `
+                <tr>
+                    <td class="highlight">${id}</td>
+                    <td style="font-weight: 600;">${name}</td>
+                    <td>${level}</td>
+                    <td>${major}</td>
+                </tr>
+            `;
+        });
+    }
 
     res.end(`
 <!DOCTYPE html>
@@ -255,6 +261,8 @@ const server = http.createServer(async (req, res) => {
         .container {
             position: relative;
             z-index: 10;
+            width: 100%;
+            max-width: 750px;
         }
 
         .card {
@@ -265,7 +273,6 @@ const server = http.createServer(async (req, res) => {
                         inset 0 0 30px rgba(255, 220, 230, 0.5);
             padding: 45px 35px;
             text-align: center;
-            max-width: 600px;
             width: 100%;
             border: 5px solid #ff69b4;
             position: relative;
@@ -367,58 +374,44 @@ const server = http.createServer(async (req, res) => {
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin: 0 0 28px 0;
-            font-size: 2rem;
+            margin: 0 0 20px 0;
+            font-size: 1.8rem;
             font-weight: 700;
             border-bottom: 3px dashed #ffb6d9;
-            padding-bottom: 18px;
+            padding-bottom: 15px;
         }
 
-        .info-group {
-            margin-bottom: 25px;
+        /* ตกแต่งตาราง */
+        .table-responsive {
+            overflow-x: auto;
+            margin: 20px 0;
         }
 
-        .info-text {
-            font-size: 1.1rem;
-            margin: 10px 0;
-            color: #c2185b;
-            display: flex;
-            justify-content: space-between;
-            padding: 12px 18px;
-            background: linear-gradient(135deg, rgba(255, 182, 193, 0.3), rgba(255, 220, 230, 0.3));
-            border-radius: 15px;
-            border-left: 5px solid #ff69b4;
-            border-right: 2px solid #ffb6d9;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .info-text::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
+        .student-table {
             width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-            animation: shine 3s ease-in-out infinite;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(255, 105, 180, 0.2);
         }
 
-        @keyframes shine {
-            0% { left: -100%; }
-            50% { left: 100%; }
-            100% { left: 100%; }
+        .student-table th {
+            background: linear-gradient(135deg, #ff69b4, #db7093);
+            color: white;
+            padding: 12px 15px;
+            font-size: 1rem;
         }
 
-        .info-text:hover {
-            transform: translateX(8px) scale(1.02);
-            box-shadow: 0 5px 20px rgba(255, 105, 180, 0.3);
+        .student-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #ffe4e1;
+            color: #c2185b;
+            font-size: 0.95rem;
         }
 
-        .info-label {
-            font-weight: 600;
-            color: #db7093;
+        .student-table tr:hover {
+            background-color: #fff0f5;
         }
 
         .highlight {
@@ -565,41 +558,43 @@ const server = http.createServer(async (req, res) => {
                 <div class="mickey-ear-right"></div>
                 <div class="mickey-head"></div>
             </div>
-           
+            
             <div class="magic-spell">✨ Princess Magic ✨</div>
-            <h1>ยินดีต้อนรับสู่ Web Server ของ</h1>
-            <h2>${studentData.name}</h2>
-           
-            <div class="info-group">
-                <div class="info-text">
-                    <span class="info-label">🎓 รหัสนักศึกษา:</span>
-                    <span class="highlight">${studentData.id}</span>
-                </div>
-                <div class="info-text">
-                    <span class="info-label">📚 ระดับชั้น:</span>
-                    <span class="highlight">${studentData.level}</span>
-                </div>
-                <div class="info-text">
-                    <span class="info-label">💻 สาขา:</span>
-                    <span class="highlight">${studentData.major}</span>
-                </div>
+            <h1>ยินดีต้อนรับสู่ Web Server</h1>
+            <h2>ฐานข้อมูลนักศึกษา (PostgreSQL)</h2>
+            
+            <!-- ตารางแสดงรายการข้อมูลนักศึกษาจากโค้ดชุดแรก -->
+            <div class="table-responsive">
+                <table class="student-table">
+                    <thead>
+                        <tr>
+                            <th>รหัสนักศึกษา</th>
+                            <th>ชื่อ-นามสกุล</th>
+                            <th>ระดับชั้น</th>
+                            <th>สาขาวิชา</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRowsHTML}
+                    </tbody>
+                </table>
             </div>
-           
+            
             <div class="status">ดินแดนเวทมนตร์บนระบบ Railway 👑</div>
 
             <div class="db-status">
                 <p><strong>🗄️ สถานะฐานข้อมูล:</strong> <span class="${serverInfo.status.includes('✅') ? 'success' : 'error'}">${serverInfo.status}</span></p>
                 <p><strong>⏰ เวลาเซิร์ฟเวอร์:</strong> ${serverInfo.serverTime}</p>
-                <p><strong>📦 PostgreSQL Version:</strong> ${serverInfo.version.substring(0, 50)}...</p>
+                <p><strong>📦 PostgreSQL Version:</strong> ${serverInfo.version ? serverInfo.version.substring(0, 50) : 'N/A'}...</p>
                 ${serverInfo.message ? `<p class="error"><strong>⚠️ ข้อผิดพลาด:</strong> ${serverInfo.message}</p>` : ''}
             </div>
 
-            <button class="interactive-btn">✨ คลิกเพื่อต่อการเวทมนตร์ ✨</button>
+            <button class="interactive-btn">✨ คลิกเพื่อร่ายเวทมนตร์ ✨</button>
 
             <div class="api-links">
                 <p style="margin-bottom: 10px;"><strong>📡 API Endpoints:</strong></p>
-                <a href="/api/status" class="api-link">API Status</a>
-                <a href="/api/students" class="api-link">API Students</a>
+                <a href="/api/status" class="api-link" target="_blank">API Status</a>
+                <a href="/api/students" class="api-link" target="_blank">API Students</a>
             </div>
         </div>
     </div>
@@ -614,7 +609,7 @@ const server = http.createServer(async (req, res) => {
                 particle.style.fontSize = Math.random() * 20 + 20 + 'px';
                 particle.style.left = this.offsetLeft + this.offsetWidth / 2 + 'px';
                 particle.style.top = this.offsetTop + this.offsetHeight / 2 + 'px';
-                particle.style.animation = \`particle-fall \${2 + Math.random()}s ease-out forwards\`;
+                particle.style.animation = `particle-fall ${2 + Math.random()}s ease-out forwards`;
                 document.body.appendChild(particle);
                 setTimeout(() => particle.remove(), 2000);
             }
@@ -628,7 +623,7 @@ const server = http.createServer(async (req, res) => {
                 opacity: 1;
             }
             100% {
-                transform: translateY(300px) translateX(\${Math.random() * 200 - 100}px) scale(0);
+                transform: translateY(300px) translateX(${Math.random() * 200 - 100}px) scale(0);
                 opacity: 0;
             }
         }
@@ -637,30 +632,25 @@ const server = http.createServer(async (req, res) => {
 </body>
 </html>
     `);
-
 });
 
-// 10. เชื่อมต่อกับฐานข้อมูลและดึงข้อมูลเมื่อเซิร์ฟเวอร์เริ่มต้น
+// 8. เริ่มต้นระบบและเปิดเซิร์ฟเวอร์
 (async () => {
     console.log('🚀 เริ่มต้นเซิร์ฟเวอร์...');
     
-    // ทดสอบการเชื่อมต่อ
-    await connectToDatabase();
-    
-    // ดึงข้อมูลนักศึกษา
-    await fetchStudentData();
+    // สร้างตารางและข้อมูลตั้งต้น
+    await initDatabase();
 
-    // 11. เปิดให้เซิร์ฟเวอร์เริ่มรับฟัง
+    // เริ่มรับฟัง HTTP Request
     server.listen(port, () => {
-        console.log(`✨ Princess Magical Server is running! ดินแดนดิสนีย์แลนด์เจ้าหญิงเปิดใช้งานแล้ว`);
+        console.log(`✨ Princess Magical Server is running! ดินแดนดิสนีย์แลนด์เปิดใช้งานแล้ว`);
         console.log(`🌐 URL: http://localhost:${port}`);
-        console.log(`📡 API Status: http://localhost:${port}/api/status`);
-        console.log(`📊 API Students: http://localhost:${port}/api/students`);
     });
 })();
 
-// 12. ปิดการเชื่อมต่อเมื่อเซิร์ฟเวอร์ปิด
-process.on('SIGINT', () => {
-    console.log('\\n🌟 ปิดเซิร์ฟเวอร์ดินแดนเวทมนตร์...');
+// ปิดการเชื่อมต่อเมื่อหยุดการทำงาน
+process.on('SIGINT', async () => {
+    console.log('\n🌟 ปิดเซิร์ฟเวอร์ดินแดนเวทมนตร์...');
+    await pool.end();
     process.exit(0);
 });
