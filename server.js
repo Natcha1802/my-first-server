@@ -1,11 +1,128 @@
 // 1. เรียกใช้งาน Module ที่ชื่อว่า 'http' สำหรับทำเว็บเซิร์ฟเวอร์
 const http = require('http');
 
-// 2. กำหนดช่องทาง (Port) ให้รองรับการทำงานบน Cloud เช่น Railway หรือดีฟอลต์พอร์ต 3000
+// 2. เรียกใช้งาน PostgreSQL Driver
+const { Client } = require('pg');
+
+// 3. กำหนดช่องทาง (Port) ให้รองรับการทำงานบน Cloud เช่น Railway หรือดีฟอลต์พอร์ต 3000
 const port = process.env.PORT || 3000;
 
-// 3. สร้างเซิร์ฟเวอร์เพื่อคอยรับและตอบกลับคำขอของผู้ใช้งาน
-const server = http.createServer((req, res) => {
+// 4. ตั้งค่าการเชื่อมต่อ PostgreSQL
+const dbConfig = {
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'password',
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME || 'my_database',
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false
+};
+
+// 5. ตัวแปรเก็บสถานะการเชื่อมต่อ
+let dbConnected = false;
+let studentData = {
+    id: '69319010047',
+    name: 'นางสาวณัฐชา พิมพ์ทวด',
+    level: 'HIT.1/1 (VB)',
+    major: 'เทคโนโลยีสารสนเทศ'
+};
+
+// 6. ฟังก์ชันเชื่อมต่อกับ PostgreSQL
+async function connectToDatabase() {
+    const client = new Client(dbConfig);
+    try {
+        await client.connect();
+        console.log('✅ เชื่อมต่อ PostgreSQL สำเร็จ!');
+        
+        // ทดสอบการคิวรี่ข้อมูล
+        const result = await client.query('SELECT NOW() as current_time');
+        console.log('⏰ เวลาฐานข้อมูล:', result.rows[0].current_time);
+        
+        dbConnected = true;
+        await client.end();
+        return true;
+    } catch (error) {
+        console.error('❌ ไม่สามารถเชื่อมต่อ PostgreSQL ได้:', error.message);
+        dbConnected = false;
+        return false;
+    }
+}
+
+// 7. ฟังก์ชันดึงข้อมูลจากฐานข้อมูล
+async function fetchStudentData() {
+    const client = new Client(dbConfig);
+    try {
+        await client.connect();
+        
+        // ถ้าตารางมีอยู่แล้ว ให้ดึงข้อมูล (หรือสร้างตารางใหม่)
+        try {
+            const result = await client.query(
+                'SELECT id, name, level, major FROM students LIMIT 1'
+            );
+            
+            if (result.rows.length > 0) {
+                studentData = result.rows[0];
+                console.log('📊 ดึงข้อมูลนักศึกษาจากฐานข้อมูลสำเร็จ');
+            }
+        } catch (err) {
+            // ถ้าตารางไม่มี ให้สร้างตารางใหม่
+            console.log('📋 สร้างตารางใหม่...');
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS students (
+                    id VARCHAR(20) PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    level VARCHAR(50) NOT NULL,
+                    major VARCHAR(100) NOT NULL
+                )
+            `);
+            
+            // เพิ่มข้อมูลตัวอย่าง
+            await client.query(
+                'INSERT INTO students (id, name, level, major) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+                ['69319010047', 'นางสาวณัฐชา พิมพ์ทวด', 'HIT.1/1 (VB)', 'เทคโนโลยีสารสนเทศ']
+            );
+            console.log('✨ สร้างตารางและเพิ่มข้อมูลสำเร็จ');
+        }
+        
+        await client.end();
+    } catch (error) {
+        console.error('⚠️ ข้อผิดพลาดในการดึงข้อมูล:', error.message);
+    }
+}
+
+// 8. ฟังก์ชันดึงข้อมูลทั่วไปจากฐานข้อมูล
+async function getServerInfo() {
+    const client = new Client(dbConfig);
+    let info = {
+        status: '❌ ไม่เชื่อมต่อ',
+        serverTime: 'N/A',
+        version: 'N/A',
+        message: ''
+    };
+    
+    try {
+        await client.connect();
+        
+        // ดึงเวลาปัจจุบัน
+        const timeResult = await client.query('SELECT NOW() as current_time');
+        info.serverTime = timeResult.rows[0].current_time;
+        
+        // ดึงเวอร์ชัน PostgreSQL
+        const versionResult = await client.query('SELECT version()');
+        info.version = versionResult.rows[0].version;
+        
+        info.status = '✅ เชื่อมต่อสำเร็จ';
+        
+        await client.end();
+    } catch (error) {
+        info.status = '⚠️ ข้อผิดพลาด';
+        info.message = error.message;
+    }
+    
+    return info;
+}
+
+// 9. สร้างเซิร์ฟเวอร์ HTTP
+const server = http.createServer(async (req, res) => {
 
     // ตรวจสอบและดักจับคำขอ Favicon เพื่อป้องกันเซิร์ฟเวอร์ทำงานซ้ำซ้อน
     if (req.url === '/favicon.ico') {
@@ -14,13 +131,29 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // 3.1 กำหนดรหัสสถานะเป็น 200 (ทำงานสำเร็จ)
-    res.statusCode = 200;
+    // ตรวจสอบ route
+    if (req.url === '/api/status' && req.method === 'GET') {
+        // API endpoint สำหรับตรวจสอบสถานะฐานข้อมูล
+        const info = await getServerInfo();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(info, null, 2));
+        return;
+    }
 
-    // 3.2 กำหนดให้ผลลัพธ์เป็นไฟล์ HTML รองรับภาษาไทย (utf-8)
+    if (req.url === '/api/students' && req.method === 'GET') {
+        // API endpoint สำหรับดึงข้อมูลนักศึกษา
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(studentData, null, 2));
+        return;
+    }
+
+    // หน้าแรก (Home Page)
+    res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
-    // 3.3 ส่งหน้าเว็บดีไซน์ธีม "Disneyland Princess" สุดมหัศจรรย์กลับไป
+    // ดึงข้อมูลสถานะฐานข้อมูล
+    const serverInfo = await getServerInfo();
+
     res.end(`
 <!DOCTYPE html>
 <html lang="th">
@@ -37,7 +170,6 @@ const server = http.createServer((req, res) => {
         }
 
         body {
-            /* พื้นหลังไล่เฉดสีชมพูและม่วงขอบฟ้าเศษ */
             background: linear-gradient(135deg, #ffd1e8 0%, #f8bbd0 25%, #f3aed9 50%, #e896d3 75%, #d78ec6 100%);
             background-size: 400% 400%;
             animation: gradientShift 15s ease infinite;
@@ -45,9 +177,10 @@ const server = http.createServer((req, res) => {
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             color: #333;
-            overflow: hidden;
+            overflow: auto;
+            padding: 20px;
             position: relative;
         }
 
@@ -57,12 +190,12 @@ const server = http.createServer((req, res) => {
             100% { background-position: 0% 50%; }
         }
 
-        /* ดาวระยิบระยับด้านหลัง */
         .star {
-            position: absolute;
+            position: fixed;
             font-size: 1.5rem;
             color: rgba(255, 255, 255, 0.7);
             animation: twinkle 3s ease-in-out infinite;
+            z-index: 1;
         }
 
         .star:nth-child(1) { top: 10%; left: 15%; animation-delay: 0s; }
@@ -76,12 +209,13 @@ const server = http.createServer((req, res) => {
             50% { opacity: 1; transform: scale(1.2) rotate(10deg); }
         }
 
-        /* ปุ่มเวทมนตร์ลอยสูง */
         .floating-orb {
-            position: absolute;
+            position: fixed;
             border-radius: 50%;
             box-shadow: 0 0 30px rgba(255, 182, 193, 0.8);
             animation: float 4s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 0;
         }
 
         .orb-1 {
@@ -118,7 +252,11 @@ const server = http.createServer((req, res) => {
             50% { transform: translateY(-30px) translateX(15px) scale(1.1); }
         }
 
-        /* การ์ดข้อมูลสไตล์เจ้าหญิง */
+        .container {
+            position: relative;
+            z-index: 10;
+        }
+
         .card {
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 240, 245, 0.98));
             border-radius: 30px;
@@ -127,13 +265,14 @@ const server = http.createServer((req, res) => {
                         inset 0 0 30px rgba(255, 220, 230, 0.5);
             padding: 45px 35px;
             text-align: center;
-            max-width: 520px;
-            width: 92%;
+            max-width: 600px;
+            width: 100%;
             border: 5px solid #ff69b4;
             position: relative;
             box-sizing: border-box;
             backdrop-filter: blur(10px);
             animation: cardGlow 3s ease-in-out infinite;
+            margin: 20px auto;
         }
 
         @keyframes cardGlow {
@@ -141,7 +280,6 @@ const server = http.createServer((req, res) => {
             50% { box-shadow: 0 20px 60px rgba(219, 112, 147, 0.6), 0 0 50px rgba(255, 105, 180, 0.5), inset 0 0 30px rgba(255, 220, 230, 0.7); }
         }
 
-        /* โครมมิกกี้เจ้าหญิงชมพู */
         .mickey-brand {
             display: flex;
             justify-content: center;
@@ -198,7 +336,6 @@ const server = http.createServer((req, res) => {
             75% { transform: rotate(10deg); }
         }
 
-        /* ข้อความต้อนรับเวทมนตร์ */
         .magic-spell {
             font-family: 'Cinzel', serif;
             font-size: 1.3rem;
@@ -235,10 +372,8 @@ const server = http.createServer((req, res) => {
             font-weight: 700;
             border-bottom: 3px dashed #ffb6d9;
             padding-bottom: 18px;
-            text-shadow: 2px 2px 4px rgba(255, 182, 193, 0.2);
         }
 
-        /* ข้อมูลของนักเรียน */
         .info-group {
             margin-bottom: 25px;
         }
@@ -291,13 +426,13 @@ const server = http.createServer((req, res) => {
             font-weight: bold;
         }
 
-        /* แถบสถานะระบบ */
         .status {
             background: linear-gradient(135deg, #ff69b4, #db7093);
             color: #fff;
             padding: 15px 25px;
             border-radius: 15px;
-            display: inline-flex;
+            display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 10px;
@@ -333,7 +468,34 @@ const server = http.createServer((req, res) => {
             100% { transform: rotate(360deg); }
         }
 
-        /* ปุ่มปฏิสัมพันธ์ */
+        .db-status {
+            background: linear-gradient(135deg, rgba(255, 182, 193, 0.4), rgba(255, 220, 230, 0.4));
+            padding: 20px;
+            border-radius: 15px;
+            margin-top: 20px;
+            border-left: 5px solid #ff69b4;
+            font-size: 0.9rem;
+            color: #333;
+            text-align: left;
+        }
+
+        .db-status p {
+            margin: 8px 0;
+            word-break: break-all;
+        }
+
+        .db-status strong {
+            color: #c2185b;
+        }
+
+        .db-status .success {
+            color: #28a745;
+        }
+
+        .db-status .error {
+            color: #ff1493;
+        }
+
         .interactive-btn {
             display: inline-block;
             margin-top: 20px;
@@ -358,58 +520,92 @@ const server = http.createServer((req, res) => {
         .interactive-btn:active {
             transform: translateY(-1px) scale(1.02);
         }
+
+        .api-links {
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 2px dashed #ffb6d9;
+        }
+
+        .api-link {
+            display: inline-block;
+            margin: 10px 5px;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, rgba(255, 105, 180, 0.2), rgba(219, 112, 147, 0.2));
+            border: 2px solid #ff69b4;
+            border-radius: 15px;
+            text-decoration: none;
+            color: #c2185b;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .api-link:hover {
+            background: linear-gradient(135deg, rgba(255, 105, 180, 0.4), rgba(219, 112, 147, 0.4));
+            transform: scale(1.05);
+        }
     </style>
 </head>
 <body>
 
-    <!-- ดาวระยิบระยับด้านหลัง -->
     <div class="star">✨</div>
     <div class="star">⭐</div>
     <div class="star">✨</div>
     <div class="star">⭐</div>
     <div class="star">✨</div>
 
-    <!-- ปุ่มเวทมนตร์ลอยสูง -->
     <div class="floating-orb orb-1"></div>
     <div class="floating-orb orb-2"></div>
     <div class="floating-orb orb-3"></div>
 
-    <div class="card">
-        <!-- สัญลักษณ์ Mickey Mouse เจ้าหญิงชมพู ตกแต่งด้านบนการ์ด -->
-        <div class="mickey-brand">
-            <div class="mickey-ear-left"></div>
-            <div class="mickey-ear-right"></div>
-            <div class="mickey-head"></div>
-        </div>
-       
-        <div class="magic-spell">✨ Princess Magic ✨</div>
-        <h1>ยินดีต้อนรับสู่ Web Server ของ</h1>
-        <h2>นางสาวณัฐชา พิมพ์ทวด</h2>
-       
-        <div class="info-group">
-            <div class="info-text">
-                <span class="info-label">🎓 รหัสนักศึกษา:</span>
-                <span class="highlight">69319010047</span>
+    <div class="container">
+        <div class="card">
+            <div class="mickey-brand">
+                <div class="mickey-ear-left"></div>
+                <div class="mickey-ear-right"></div>
+                <div class="mickey-head"></div>
             </div>
-            <div class="info-text">
-                <span class="info-label">📚 ระดับชั้น:</span>
-                <span class="highlight">HIT.1/1 (VB)</span>
+           
+            <div class="magic-spell">✨ Princess Magic ✨</div>
+            <h1>ยินดีต้อนรับสู่ Web Server ของ</h1>
+            <h2>${studentData.name}</h2>
+           
+            <div class="info-group">
+                <div class="info-text">
+                    <span class="info-label">🎓 รหัสนักศึกษา:</span>
+                    <span class="highlight">${studentData.id}</span>
+                </div>
+                <div class="info-text">
+                    <span class="info-label">📚 ระดับชั้น:</span>
+                    <span class="highlight">${studentData.level}</span>
+                </div>
+                <div class="info-text">
+                    <span class="info-label">💻 สาขา:</span>
+                    <span class="highlight">${studentData.major}</span>
+                </div>
             </div>
-            <div class="info-text">
-                <span class="info-label">💻 สาขา:</span>
-                <span class="highlight">เทคโนโลยีสารสนเทศ</span>
-            </div>
-        </div>
-       
-        <div class="status">ดินแดนเวทมนตร์บนระบบ Railway เปิดทำงานปกติแล้วค่ะ! 👑</div>
+           
+            <div class="status">ดินแดนเวทมนตร์บนระบบ Railway 👑</div>
 
-        <button class="interactive-btn">✨ คลิกเพื่อต่อการเวทมนตร์ ✨</button>
+            <div class="db-status">
+                <p><strong>🗄️ สถานะฐานข้อมูล:</strong> <span class="${serverInfo.status.includes('✅') ? 'success' : 'error'}">${serverInfo.status}</span></p>
+                <p><strong>⏰ เวลาเซิร์ฟเวอร์:</strong> ${serverInfo.serverTime}</p>
+                <p><strong>📦 PostgreSQL Version:</strong> ${serverInfo.version.substring(0, 50)}...</p>
+                ${serverInfo.message ? `<p class="error"><strong>⚠️ ข้อผิดพลาด:</strong> ${serverInfo.message}</p>` : ''}
+            </div>
+
+            <button class="interactive-btn">✨ คลิกเพื่อต่อการเวทมนตร์ ✨</button>
+
+            <div class="api-links">
+                <p style="margin-bottom: 10px;"><strong>📡 API Endpoints:</strong></p>
+                <a href="/api/status" class="api-link">API Status</a>
+                <a href="/api/students" class="api-link">API Students</a>
+            </div>
+        </div>
     </div>
 
     <script>
-        // เพิ่มเสียงและเอฟเฟกต์เมื่อคลิกปุ่ม
         document.querySelector('.interactive-btn').addEventListener('click', function() {
-            // สร้างอนุภาคเล็กๆ ตกลงมา
             for (let i = 0; i < 10; i++) {
                 const particle = document.createElement('div');
                 particle.style.position = 'fixed';
@@ -444,7 +640,27 @@ const server = http.createServer((req, res) => {
 
 });
 
-// 4. สั่งให้เซิร์ฟเวอร์เริ่มต้นเปิดรับฟังการทำงานตาม Port ที่กำหนดไว้
-server.listen(port, () => {
-    console.log(`✨ Princess Magical Server is running! ดินแดนดิสนีย์แลนด์เจ้าหญิงเปิดใช้งานแล้วที่ช่องทางพอร์ต: ${port}`);
+// 10. เชื่อมต่อกับฐานข้อมูลและดึงข้อมูลเมื่อเซิร์ฟเวอร์เริ่มต้น
+(async () => {
+    console.log('🚀 เริ่มต้นเซิร์ฟเวอร์...');
+    
+    // ทดสอบการเชื่อมต่อ
+    await connectToDatabase();
+    
+    // ดึงข้อมูลนักศึกษา
+    await fetchStudentData();
+
+    // 11. เปิดให้เซิร์ฟเวอร์เริ่มรับฟัง
+    server.listen(port, () => {
+        console.log(`✨ Princess Magical Server is running! ดินแดนดิสนีย์แลนด์เจ้าหญิงเปิดใช้งานแล้ว`);
+        console.log(`🌐 URL: http://localhost:${port}`);
+        console.log(`📡 API Status: http://localhost:${port}/api/status`);
+        console.log(`📊 API Students: http://localhost:${port}/api/students`);
+    });
+})();
+
+// 12. ปิดการเชื่อมต่อเมื่อเซิร์ฟเวอร์ปิด
+process.on('SIGINT', () => {
+    console.log('\\n🌟 ปิดเซิร์ฟเวอร์ดินแดนเวทมนตร์...');
+    process.exit(0);
 });
