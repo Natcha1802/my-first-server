@@ -39,17 +39,21 @@ const rootHtml = `<!DOCTYPE html>
   <style>
     /* Minimal trimmed styles from original theme for clarity */
     *{box-sizing:border-box}
-    body{margin:0;min-height:100vh;font-family:'Sarabun',sans-serif;background:linear-gradient(135deg,#ffd1e8 0,#f3aed9 50%,#d78ec6 100%);display:flex;align-items:center;justify-content:center;color:#5a3d4a}
+    body{margin:0;min-height:100vh;font-family:'Sarabun',sans-serif;background:linear-gradient(135deg,#ffd1e8 0,#f3aed9 50%,#d78ec6 100%);display:flex;align-items:center;justify-content:center;color:#6a4056}
     .card{max-width:920px;width:94%;background:linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,240,245,0.98));border-radius:20px;padding:28px;border:4px solid #ff69b4;box-shadow:0 20px 60px rgba(255,105,180,0.3)}
     h1{color:#c2185b;margin-top:0}
     .status{background:linear-gradient(135deg,#ff69b4,#db7093);color:#fff;padding:10px;border-radius:12px;display:inline-block;margin-bottom:12px}
     .students-table{width:100%;border-collapse:collapse;margin-top:16px}
     .students-table th,.students-table td{padding:10px;border:1px solid #ffb6d9}
+    .students-table th{background:#ffe4f0;font-weight:600;color:#c2185b}
+    .students-table tr:nth-child(even){background:#fff5f9}
     .hint{color:#6a4056;font-size:0.9rem;margin-top:12px}
-    .interactive-btn{display:inline-block;margin-top:14px;padding:10px 20px;background:linear-gradient(135deg,#ff1493,#ff69b4);color:#fff;border-radius:20px;border:none;cursor:pointer;font-size:1rem;font-weight:600}
+    .interactive-btn{display:inline-block;margin-top:14px;padding:10px 20px;background:linear-gradient(135deg,#ff1493,#ff69b4);color:#fff;border-radius:20px;border:none;cursor:pointer;font-size:1rem;font-weight:600;transition:all 0.3s ease}
     .interactive-btn:hover{opacity:0.9;transform:scale(1.05)}
-    pre{background:#fff1f6;padding:12px;border-radius:8px;overflow-x:auto}
+    pre{background:#fff1f6;padding:12px;border-radius:8px;overflow-x:auto;border-left:4px solid #ff69b4}
     code{font-family:'Courier New',monospace;font-size:0.9rem}
+    hr{border:none;border-top:2px solid #ffb6d9;margin:20px 0}
+    p{line-height:1.6}
   </style>
 </head>
 <body>
