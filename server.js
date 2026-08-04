@@ -61,23 +61,13 @@ const rootHtml = `<!DOCTYPE html>
     <h1>ยินดีต้อนรับสู่ Web Server ของ นางสาวณัฐชา พิมพ์ทวด</h1>
     <div class="status">ดินแดนเวทมนตร์บนระบบ Railway เปิดทำงานปกติแล้วค่ะ! 👑</div>
 
-    <p class="hint">ข้อมูลนักศึกษาจะแสดงด้านล่าง (อ่านจากตาราง <code>students</code> ในฐานข้อมูล)</p>
+    <p class="hint">ข้อมูลนักศึกษาจะแสดงด้านล่าง</p>
 
     <div id="students">
       <p>กำลังโหลดข้อมูลนักศึกษา...</p>
     </div>
 
     <button class="interactive-btn" id="refresh">✨ รีเฟรชข้อมูลนักศึกษา ✨</button>
-
-    <hr/>
-    <p class="hint">หมายเหตุ: หากยังไม่มีตาราง <code>students</code> ให้สร้างด้วยตัวอย่าง SQL ด้านล่าง:</p>
-    <pre><code>CREATE TABLE students (
-  student_id VARCHAR(50) PRIMARY KEY,
-  student_name TEXT
-);
-
-INSERT INTO students (student_id, student_name) VALUES ('69319010047', 'นางสาวณัฐชา พิมพ์ทวด');
-</code></pre>
   </div>
 
   <script>
